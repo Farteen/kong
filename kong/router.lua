@@ -13,6 +13,7 @@ local upper         = string.upper
 local lower         = string.lower
 local find          = string.find
 local sub           = string.sub
+local tonumber      = tonumber
 local ipairs        = ipairs
 local pairs         = pairs
 local error         = error
@@ -65,6 +66,9 @@ local MATCH_RULES = {
   SRC             = 0x00000002,
   DST             = 0x00000001,
 }
+
+
+local EMPTY_T = {}
 
 
 local match_route
@@ -333,30 +337,34 @@ local function marshall_route(r)
     route_t.upstream_url_t.scheme = protocol
   end
 
-  local host = service.host
-  if host then
-    route_t.upstream_url_t.host = host
-    route_t.upstream_url_t.type = hostname_type(host)
+  do
+    local s = service or EMPTY_T
 
-  else
-    route_t.upstream_url_t.type = hostname_type("")
-  end
+    local host = s.host
+    if host then
+      route_t.upstream_url_t.host = host
+      route_t.upstream_url_t.type = hostname_type(host)
 
-  local port = service.port
-  if port then
-    route_t.upstream_url_t.port = port
-
-  else
-    if protocol == "https" then
-      route_t.upstream_url_t.port = 443
-
-    elseif protocol == "http" then
-      route_t.upstream_url_t.port = 80
+    else
+      route_t.upstream_url_t.type = hostname_type("")
     end
-  end
 
-  if route_t.type == "http" then
-    route_t.upstream_url_t.path = service.path or "/"
+    local port = s.port
+    if port then
+      route_t.upstream_url_t.port = port
+
+    else
+      if protocol == "https" then
+        route_t.upstream_url_t.port = 443
+
+      elseif protocol == "http" then
+        route_t.upstream_url_t.port = 80
+      end
+    end
+
+    if route_t.type == "http" then
+      route_t.upstream_url_t.path = s.path or "/"
+    end
   end
 
   return route_t
@@ -1129,14 +1137,13 @@ function _M.new(routes)
             local upstream_url_t = matched_route.upstream_url_t
             local matches        = ctx.matches
 
-
             -- Path construction
 
             if matched_route.type == "http" then
               -- if we do not have a path-match, then the postfix is simply the
               -- incoming path, without the initial slash
-              local request_postfix = matches.uri_postfix or sub(req_uri, 2, -1)
-              local upstream_base = upstream_url_t.path
+              local request_postfix = matches.uri_postfix or sub(req_uri, 2)
+              local upstream_base = upstream_url_t.path or "/"
 
               if matched_route.strip_uri then
                 -- we drop the matched part, replacing it with the upstream path
@@ -1152,7 +1159,7 @@ function _M.new(routes)
               else
                 -- we retain the incoming path, just prefix it with the upstream
                 -- path, but skip the initial slash
-                upstream_uri = upstream_base .. sub(req_uri, 2, -1)
+                upstream_uri = upstream_base .. sub(req_uri, 2)
               end
 
               -- preserve_host header logic
@@ -1229,11 +1236,24 @@ function _M.new(routes)
       -- debug HTTP request header logic
 
       if ngx.var.http_kong_debug then
-        ngx.header["Kong-Route-Id"]   = match_t.route.id
-        ngx.header["Kong-Service-Id"] = match_t.service.id
+        if match_t.route then
+          if match_t.route.id then
+            ngx.header["Kong-Route-Id"] = match_t.route.id
+          end
 
-        if match_t.service.name then
-          ngx.header["Kong-Service-Name"] = match_t.service.name
+          if match_t.route.name then
+            ngx.header["Kong-Route-Name"] = match_t.route.name
+          end
+        end
+
+        if match_t.service then
+          if match_t.service.id then
+            ngx.header["Kong-Service-Id"] = match_t.service.id
+          end
+
+          if match_t.service.name then
+            ngx.header["Kong-Service-Name"] = match_t.service.name
+          end
         end
       end
 
